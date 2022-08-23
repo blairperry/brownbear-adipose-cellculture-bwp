@@ -1,0 +1,920 @@
+---
+title: "Cell_culture_new"
+author: "Michael Saxton"
+date: "11/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Install Packages, echo = FALSE}
+install.packages("BiocManager")
+BiocManager::install(c("edgeR","DESeq2","AnnotationDbi", "impute", "GO.db", "preprocessCore","Glimma"))
+BiocManager::install("EDASeq")
+install.packages("WGCNA")
+install.packages("RColorBrewer")
+install.packages("gplots")
+install.packages("statmod")
+```
+```{r Load libraries, echo = FALSE}
+library(edgeR)
+library(DESeq2)
+library(WGCNA)
+library(reshape2)
+library(EDASeq)
+library(RColorBrewer)
+library(gplots)
+library(statmod)
+library(limma)
+library(Glimma)
+library(gplots)
+library(ggplot2)
+library(viridis)
+library(UpSetR)
+options(stringsAsFactors = FALSE);
+```
+
+# Set the working directory
+
+```{r Set WD, echo = FALSE}
+setwd("/Users/michaelsaxton/Desktop/Projects/Cell_culture")
+```
+
+# Load the gene count matrix, remove rRNA, and filter for lowly expressed genes
+
+```{r, results = 'hide'}
+gene_all <- read.csv("Cell_culture_gene_count_matrix.csv",header=T, row.names=1)
+
+# Count number of transcripts and number of individuals
+dim(gene_all)
+
+# Remove all annotated rRNA genes
+gene_all = gene_all[-which(rownames(gene_all) %in% c("gene10974|LOC113259291","gene17084|LOC113266004","gene26915|LOC113246229","gene26916|LOC113246230","gene27720|LOC113247006","gene29258|LOC113248751","gene29259|LOC113248750","gene29260|LOC113248754","gene29262|LOC113248752","gene29263|LOC113248755","gene29856|LOC113249424","gene6633|LOC113254166","gene946|LOC113257075","gene947|LOC113257125","rna54509","rna54511")),]
+
+dim(gene_all)
+
+# Trim out any transcripts with no counts
+total <- gene_all[rowSums(gene_all) > 0, ]
+
+# Count number of genes and individuals
+dim(total)
+
+# Remove genes that are expressed in few individuals
+keep <- rowSums(cpm(gene_all)>0.5) >= 3
+length(which(keep == TRUE))
+
+# Keep data that meet the filtering criteria
+gene.counts <- gene_all[keep,]
+
+# Count number of transcripts left after trimming
+dim(gene.counts)
+```
+
+# Make a barplot for the library sizes
+
+```{r}
+#Sum the columns, which is the library size for each sample
+lib_sizes <- colSums(gene.counts)
+
+#Then multiply by 1e-6 to divide by one million
+lib_sizes_mod <- lib_sizes*1e-6
+
+#Make a barplot showing the library size of each sample
+#pdf(file = "1_Library_size.pdf")
+barplot(lib_sizes_mod, ylab="Library Size (Millions)", las=2, cex.names = 0.5, cex.axis = 1, xlab="Sample")
+#dev.off()
+```
+
+# MDS for entire dataset
+
+```{r MDS}
+group = factor(c("AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AG", "HA", "HH", "HG"))
+y <- DGEList(counts=gene.counts,group=group)
+y <- calcNormFactors(y)
+y$samples
+cols = c("purple","yellow","red","green","grey","blue")
+pch = c(15,16,17,18,19,20)
+for.plots = factor(c("AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AG", "HA", "HH", "HG"))
+
+#pdf(file = "2c_All_MDS_top10000.pdf")
+#plotMDS(y, top = 10000, col=cols[for.plots], pch=pch[for.plots], cex=2, gene.selection = "common", xlab="MDS axis 1", ylab="MDS axis 2")
+#legend("bottomright", as.character(c("AA","AH","AG","HA","HH","HG")), col = cols[unique(for.plots)], pch = pch[unique(for.plots)])
+#dev.off()
+
+#Construct MDS on top 500 expressed transcripts
+mds <- plotMDS(y, top=500, gene.selection = "common", cex=0.5)
+
+#pdf(file = "2d_MDS_top10000_new_cols.pdf")
+pch = c(3,21,22,23,24,25)
+plotMDS(y, top = 10000, col=cols[for.plots], pch=pch[for.plots], cex=2, gene.selection = "common", xlab="MDS axis 1", ylab="MDS axis 2")
+legend("bottomright", as.character(c("AA","AH","AG","HA","HH","HG")), col = cols[unique(for.plots)], pch = pch[unique(for.plots)])
+#dev.off()
+
+#pdf(file = "2e_MDS_top500_new_cols_test.pdf")
+pch = c(3,22,21,23,25,24)
+plotMDS(y, top = 500, col=cols[for.plots], pch=pch[for.plots], cex=2, gene.selection = "common", xlab="MDS axis 1", ylab="MDS axis 2")
+#legend("bottomright", as.character(c("AA","AH","AG","HA","HH","HG")), col = cols[unique(for.plots)], pch = pch[unique(for.plots)])
+#dev.off()
+```
+
+# Alternate MDS collor scheme
+```{r, results = hide}
+group = factor(c("AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AG", "HA", "HH", "HG"))
+y <- DGEList(counts=gene.counts,group=group)
+y <- calcNormFactors(y)
+y$samples
+cols = c("red","blue")
+pch = c(15,16,17)
+for.color = factor(c("A", "A", "A", "H", "H", "H", "A", "A", "A", "H", "H", "H", "A", "A", "A", "H", "H", "H", "A", "A", "A", "H", "H", "H", "A", "A", "A", "H", "H", "H", "A", "A", "H", "H", "H"))
+for.shape = factor(c("A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "H", "G", "A", "G", "A", "H", "G"))
+
+#pdf(file = "6b_Adjusted_All_MDS_top10000.pdf")
+plotMDS(y, top = 10000, col=cols[for.color], pch=pch[for.shape], cex=2, gene.selection = "common", xlab="MDS axis 1", ylab="MDS axis 2")
+legend("bottomright", as.character(c("AA","AH","AG","HA","HH","HG")), col = c("red","red","red","blue","blue","blue"), pch = pch[unique(for.shape)])
+#dev.off()
+```
+
+```{r, results = hide}
+#Now do the top 500 gene MDS with this color scheme
+pdf(file = "14_All_MDS_top500.pdf")
+plotMDS(y, top = 500, col=cols[for.color], pch=pch[for.shape], cex=2, gene.selection = "common", xlab="MDS axis 1", ylab="MDS axis 2")
+#legend("bottomright", as.character(c("Active/Active","Active/Hibernation","Active/Post-Glucose","Hibernation/Active","Hibernation/Hibernation","Hibernation/Post-Glucose")), col = cols[unique(for.plots)], pch = pch[unique(for.plots)])
+dev.off()
+```
+
+# Try these new plots
+
+```{r Try new plots, results = hide}
+filtered <- as.matrix(gene.counts)
+uq <- betweenLaneNormalization(filtered, which="median")
+colors <- brewer.pal(3, "Set1")
+plotRLE(uq, outline=FALSE, las=3, ylab="Relative Log Expression", cex.axis=1, cex.lab=1)
+vst <- varianceStabilizingTransformation(uq, blind = FALSE, fitType = "parametric")
+pdf(file = "3_PCA.pdf")
+plotPCA(vst, col=cols[for.plots], pch=pch[for.plots], cex=1, cex.axis=1, cex.lab=1)
+dev.off()
+
+# Print the PCA in output
+plotPCA(vst, cex=1, cex.axis=1, cex.lab=1)
+```
+
+# Make design matrix
+
+```{r Make design matrices, results = hide}
+#Design Matrices with bear as a blocking factor
+Bears.dex <- factor(c("Cooke","Cooke","Cooke","Cooke","Cooke","Cooke","Frank","Frank","Frank","Frank","Frank","Frank","John","John","John","John","John","John","Oakley","Oakley","Oakley","Oakley","Oakley","Oakley","Pacino","Pacino","Pacino","Pacino","Pacino","Pacino","Roan","Roan","Roan","Roan","Roan"))
+Cell.Serum <- factor(c("A.A","A.H","A.G","H.A","H.H","H.G","A.A","A.H","A.G","H.A","H.H","H.G","A.A","A.H","A.G","H.A","H.H","H.G","A.A","A.H","A.G","H.A","H.H","H.G","A.A","A.H","A.G","H.A","H.H","H.G","A.A","A.G","H.A","H.H","H.G"))
+fat.design <- model.matrix(~ 0 + Cell.Serum + Bears.dex, data = y$samples)
+fat.design
+```
+```{r Estimate dispersions, results = hide}
+#Estimate Dispersions
+y <- estimateDisp(y, fat.design, robust=TRUE)
+y$common.dispersion
+
+#Plot the BCV
+plotBCV(y)
+```
+
+# Fit the data
+
+```{r Fit the data, results = hide}
+#Fit the data
+fat.fit <- glmQLFit(y, fat.design, robust = TRUE)
+head(fat.fit$coefficients)
+plotQLDisp(fat.fit)
+```
+
+# Time to do the F test between samples
+# I just need to decide how I am going to do that
+
+```{r F-Test, results = hide}
+qlf.AA.AH <- glmQLFTest(fat.fit, contrast=c(-1,0,1,0,0,0,0,0,0,0,0))
+topTags(qlf.AA.AH)
+#summary(dt_AA.AH <- decideTestsDGE(qlf.AA.AH, p.value = 0.01))
+summary(dt_AA.AH <- decideTestsDGE(qlf.AA.AH, p.value = 0.05))
+
+qlf.AA.APD <- glmQLFTest(fat.fit, contrast=c(-1,1,0,0,0,0,0,0,0,0,0))
+topTags(qlf.AA.APD)
+#summary(dt_AA.APD <- decideTestsDGE(qlf.AA.APD, p.value = 0.01))
+summary(dt_AA.APD <- decideTestsDGE(qlf.AA.APD, p.value = 0.05))
+
+qlf.AA.HA <- glmQLFTest(fat.fit, contrast=c(-1,0,0,1,0,0,0,0,0,0,0))
+topTags(qlf.AA.HA)
+#summary(dt_AA.HA <- decideTestsDGE(qlf.AA.HA, p.value = 0.01))
+summary(dt_AA.HA <- decideTestsDGE(qlf.AA.HA, p.value = 0.05))
+
+qlf.AA.HH <- glmQLFTest(fat.fit, contrast=c(-1,0,0,0,0,1,0,0,0,0,0))
+topTags(qlf.AA.HH)
+#summary(dt_AA.HH <- decideTestsDGE(qlf.AA.HH, p.value = 0.01))
+summary(dt_AA.HH <- decideTestsDGE(qlf.AA.HH, p.value = 0.05))
+
+qlf.AA.HPD <- glmQLFTest(fat.fit, contrast=c(-1,0,0,0,1,0,0,0,0,0,0))
+topTags(qlf.AA.HPD)
+#summary(dt_AA.HPD <- decideTestsDGE(qlf.AA.HPD, p.value = 0.01))
+summary(dt_AA.HPD <- decideTestsDGE(qlf.AA.HPD, p.value = 0.05))
+
+qlf.AH.APD <- glmQLFTest(fat.fit, contrast=c(0,1,-1,0,0,0,0,0,0,0,0))
+topTags(qlf.AH.APD)
+#summary(dt_AH.APD <- decideTestsDGE(qlf.AH.APD, p.value = 0.01))
+summary(dt_AH.APD <- decideTestsDGE(qlf.AH.APD, p.value = 0.05))
+
+qlf.AH.HA <- glmQLFTest(fat.fit, contrast=c(0,0,-1,1,0,0,0,0,0,0,0))
+topTags(qlf.AH.HA)
+#summary(dt_AH.HA <- decideTestsDGE(qlf.AH.HA, p.value = 0.01))
+summary(dt_AH.HA <- decideTestsDGE(qlf.AH.HA, p.value = 0.05))
+
+qlf.AH.HH <- glmQLFTest(fat.fit, contrast=c(0,0,-1,0,0,1,0,0,0,0,0))
+topTags(qlf.AH.HH)
+#summary(dt_AH.HH <- decideTestsDGE(qlf.AH.HH, p.value = 0.01))
+summary(dt_AH.HH <- decideTestsDGE(qlf.AH.HH, p.value = 0.05))
+
+qlf.AH.HPD <- glmQLFTest(fat.fit, contrast=c(0,0,-1,0,1,0,0,0,0,0,0))
+topTags(qlf.AH.HPD)
+#summary(dt_AH.HPD <- decideTestsDGE(qlf.AH.HPD, p.value = 0.01))
+summary(dt_AH.HPD <- decideTestsDGE(qlf.AH.HPD, p.value = 0.05))
+
+qlf.APD.HA <- glmQLFTest(fat.fit, contrast=c(0,-1,0,1,0,0,0,0,0,0,0))
+topTags(qlf.APD.HA)
+#summary(dt_APD.HA <- decideTestsDGE(qlf.APD.HA, p.value = 0.01))
+summary(dt_APD.HA <- decideTestsDGE(qlf.APD.HA, p.value = 0.05))
+
+qlf.APD.HH <- glmQLFTest(fat.fit, contrast=c(0,-1,0,0,0,1,0,0,0,0,0))
+topTags(qlf.APD.HH)
+#summary(dt_APD.HH <- decideTestsDGE(qlf.APD.HH, p.value = 0.01))
+summary(dt_APD.HH <- decideTestsDGE(qlf.APD.HH, p.value = 0.05))
+
+qlf.APD.HPD <- glmQLFTest(fat.fit, contrast=c(0,-1,0,0,1,0,0,0,0,0,0))
+topTags(qlf.APD.HPD)
+#summary(dt_APD.HPD <- decideTestsDGE(qlf.APD.HPD, p.value = 0.01))
+summary(dt_APD.HPD <- decideTestsDGE(qlf.APD.HPD, p.value = 0.05))
+
+qlf.HA.HH <- glmQLFTest(fat.fit, contrast=c(0,0,0,-1,0,1,0,0,0,0,0))
+topTags(qlf.HA.HH)
+#summary(dt_HA.HH <- decideTestsDGE(qlf.HA.HH, p.value = 0.01))
+summary(dt_HA.HH <- decideTestsDGE(qlf.HA.HH, p.value = 0.05))
+
+qlf.HA.HPD <- glmQLFTest(fat.fit, contrast=c(0,0,0,-1,1,0,0,0,0,0,0))
+topTags(qlf.HA.HPD)
+#summary(dt_HA.HPD <- decideTestsDGE(qlf.HA.HPD, p.value = 0.01))
+summary(dt_HA.HPD <- decideTestsDGE(qlf.HA.HPD, p.value = 0.05))
+
+qlf.HPD.HH <- glmQLFTest(fat.fit, contrast=c(0,0,0,0,-1,1,0,0,0,0,0))
+topTags(qlf.HPD.HH)
+#summary(dt_HPD.HH <- decideTestsDGE(qlf.HPD.HH, p.value = 0.01))
+summary(dt_HPD.HH <- decideTestsDGE(qlf.HPD.HH, p.value = 0.05))
+```
+
+# DE Genes
+
+```{r DE Genes, results = hide}
+isDE_AA.AH <- as.logical(dt_AA.AH)
+DE_AA.AH <- rownames(y)[isDE_AA.AH]
+length(DE_AA.AH)
+
+isDE_AA.APD <- as.logical(dt_AA.APD)
+DE_AA.APD <- rownames(y)[isDE_AA.APD]
+length(DE_AA.APD)
+
+isDE_AA.HA <- as.logical(dt_AA.HA)
+DE_AA.HA <- rownames(y)[isDE_AA.HA]
+length(DE_AA.HA)
+
+isDE_AA.HH <- as.logical(dt_AA.HH)
+DE_AA.HH <- rownames(y)[isDE_AA.HH]
+length(DE_AA.HH)
+
+isDE_AA.HPD <- as.logical(dt_AA.HPD)
+DE_AA.HPD <- rownames(y)[isDE_AA.HPD]
+length(DE_AA.HPD)
+
+isDE_AH.APD <- as.logical(dt_AH.APD)
+DE_AH.APD <- rownames(y)[isDE_AH.APD]
+length(DE_AH.APD)
+
+isDE_AH.HA <- as.logical(dt_AH.HA)
+DE_AH.HA <- rownames(y)[isDE_AH.HA]
+length(DE_AH.HA)
+
+isDE_AH.HH <- as.logical(dt_AH.HH)
+DE_AH.HH <- rownames(y)[isDE_AH.HH]
+length(DE_AH.HH)
+
+isDE_AH.HPD <- as.logical(dt_AH.HPD)
+DE_AH.HPD <- rownames(y)[isDE_AH.HPD]
+length(DE_AH.HPD)
+
+isDE_APD.HA <- as.logical(dt_APD.HA)
+DE_APD.HA <- rownames(y)[isDE_APD.HA]
+length(DE_APD.HA)
+
+isDE_APD.HH <- as.logical(dt_APD.HH)
+DE_APD.HH <- rownames(y)[isDE_APD.HH]
+length(DE_APD.HH)
+
+isDE_APD.HPD <- as.logical(dt_APD.HPD)
+DE_APD.HPD <- rownames(y)[isDE_APD.HPD]
+length(DE_APD.HPD)
+
+isDE_HA.HH <- as.logical(dt_HA.HH)
+DE_HA.HH <- rownames(y)[isDE_HA.HH]
+length(DE_HA.HH)
+
+isDE_HA.HPD <- as.logical(dt_HA.HPD)
+DE_HA.HPD <- rownames(y)[isDE_HA.HPD]
+length(DE_HA.HPD)
+
+isDE_HPD.HH <- as.logical(dt_HPD.HH)
+DE_HPD.HH <- rownames(y)[isDE_HPD.HH]
+length(DE_HPD.HH)
+```
+
+# Write out a list of DE genes and their FDR
+
+```{r TopTags, results = hide}
+tt_AA.AH <- topTags(qlf.AA.AH, n = dim(qlf.AA.AH)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AA.AH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AA_AH.csv", quote = FALSE, sep = ",", row.names = T)
+AA_AH_UP <- tt_AA.AH[tt_AA.AH$logFC > 0, ]
+AA_AH_DOWN <- tt_AA.AH[tt_AA.AH$logFC < 0, ]
+write.table(AA_AH_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_AH_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AA_AH_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_AH_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.APD <- topTags(qlf.AA.APD, n = dim(qlf.AA.APD)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AA.APD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AA_APD.csv", quote = FALSE, sep = ",", row.names = T)
+AA_APD_UP <- tt_AA.APD[tt_AA.APD$logFC > 0, ]
+AA_APD_DOWN <- tt_AA.APD[tt_AA.APD$logFC < 0, ]
+write.table(AA_APD_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_APD_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AA_APD_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_APD_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.HA <- topTags(qlf.AA.HA, n = dim(qlf.AA.HA)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AA.HA, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AA_HA.csv", quote = FALSE, sep = ",", row.names = T)
+AA_HA_UP <- tt_AA.HA[tt_AA.HA$logFC > 0, ]
+AA_HA_DOWN <- tt_AA.HA[tt_AA.HA$logFC < 0, ]
+write.table(AA_HA_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_HA_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AA_HA_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_HA_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.HH <- topTags(qlf.AA.HH, n = dim(qlf.AA.HH)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AA.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AA_HH.csv", quote = FALSE, sep = ",", row.names = T)
+AA_HH_UP <- tt_AA.HH[tt_AA.HH$logFC > 0, ]
+AA_HH_DOWN <- tt_AA.HH[tt_AA.HH$logFC < 0, ]
+write.table(AA_HH_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_HH_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AA_HH_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_HH_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.HPD <- topTags(qlf.AA.HPD, n = dim(qlf.AA.HPD)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AA.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AA_HPD.csv", quote = FALSE, sep = ",", row.names = T)
+AA_HPD_UP <- tt_AA.HPD[tt_AA.HPD$logFC > 0, ]
+AA_HPD_DOWN <- tt_AA.HPD[tt_AA.HPD$logFC < 0, ]
+write.table(AA_HPD_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_HPD_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AA_HPD_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AA_HPD_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.APD <- topTags(qlf.AH.APD, n = dim(qlf.AH.APD)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AH.APD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AH_APD.csv", quote = FALSE, sep = ",", row.names = T)
+AH_APD_UP <- tt_AH.APD[tt_AH.APD$logFC > 0, ]
+AH_APD_DOWN <- tt_AH.APD[tt_AH.APD$logFC < 0, ]
+write.table(AH_APD_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_APD_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AH_APD_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_APD_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.HA <- topTags(qlf.AH.HA, n = dim(qlf.AH.HA)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AH.HA, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AH_HA.csv", quote = FALSE, sep = ",", row.names = T)
+AH_HA_UP <- tt_AH.HA[tt_AH.HA$logFC > 0, ]
+AH_HA_DOWN <- tt_AH.HA[tt_AH.HA$logFC < 0, ]
+write.table(AH_HA_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_HA_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AH_HA_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_HA_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.HH <- topTags(qlf.AH.HH, n = dim(qlf.AH.HH)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AH.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AH_HH.csv", quote = FALSE, sep = ",", row.names = T)
+AH_HH_UP <- tt_AH.HH[tt_AH.HH$logFC > 0, ]
+AH_HH_DOWN <- tt_AH.HH[tt_AH.HH$logFC < 0, ]
+write.table(AH_HH_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_HH_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AH_HH_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_HH_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.HPD <- topTags(qlf.AH.HPD, n = dim(qlf.AH.HPD)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_AH.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_AH_HPD.csv", quote = FALSE, sep = ",", row.names = T)
+AH_HPD_UP <- tt_AH.HPD[tt_AH.HPD$logFC > 0, ]
+AH_HPD_DOWN <- tt_AH.HPD[tt_AH.HPD$logFC < 0, ]
+write.table(AH_HPD_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_HPD_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(AH_HPD_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/AH_HPD_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_APD.HA <- topTags(qlf.APD.HA, n = dim(qlf.APD.HA)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_APD.HA, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_APD_HA.csv", quote = FALSE, sep = ",", row.names = T)
+APD_HA_UP <- tt_APD.HA[tt_APD.HA$logFC > 0, ]
+APD_HA_DOWN <- tt_APD.HA[tt_APD.HA$logFC < 0, ]
+write.table(APD_HA_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/APD_HA_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(APD_HA_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/APD_HA_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_APD.HH <- topTags(qlf.APD.HH, n = dim(qlf.APD.HH)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_APD.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_APD_HH.csv", quote = FALSE, sep = ",", row.names = T)
+APD_HH_UP <- tt_APD.HH[tt_APD.HH$logFC > 0, ]
+APD_HH_DOWN <- tt_APD.HH[tt_APD.HH$logFC < 0, ]
+write.table(APD_HH_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/APD_HH_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(APD_HH_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/APD_HH_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_APD.HPD <- topTags(qlf.APD.HPD, n = dim(qlf.APD.HPD)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_APD.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_APD_HPD.csv", quote = FALSE, sep = ",", row.names = T)
+APD_HPD_UP <- tt_APD.HPD[tt_APD.HPD$logFC > 0, ]
+APD_HPD_DOWN <- tt_APD.HPD[tt_APD.HPD$logFC < 0, ]
+write.table(APD_HPD_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/APD_HPD_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(APD_HPD_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/APD_HPD_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_HA.HH <- topTags(qlf.HA.HH, n = dim(qlf.HA.HH)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_HA.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_HA_HH.csv", quote = FALSE, sep = ",", row.names = T)
+HA_HH_UP <- tt_HA.HH[tt_HA.HH$logFC > 0, ]
+HA_HH_DOWN <- tt_HA.HH[tt_HA.HH$logFC < 0, ]
+write.table(HA_HH_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/HA_HH_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(HA_HH_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/HA_HH_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_HA.HPD <- topTags(qlf.HA.HPD, n = dim(qlf.HA.HPD)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_HA.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_HA_HPD.csv", quote = FALSE, sep = ",", row.names = T)
+HA_HPD_UP <- tt_HA.HPD[tt_HA.HPD$logFC > 0, ]
+HA_HPD_DOWN <- tt_HA.HPD[tt_HA.HPD$logFC < 0, ]
+write.table(HA_HPD_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/HA_HPD_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(HA_HPD_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/HA_HPD_down.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_HPD.HH <- topTags(qlf.HPD.HH, n = dim(qlf.HPD.HH)[[1]], p.value = 0.05, adjust.method = "BH")$table
+#write.table(tt_HPD.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_HPD_HH.csv", quote = FALSE, sep = ",", row.names = T)
+HPD_HH_UP <- tt_HPD.HH[tt_HPD.HH$logFC > 0, ]
+HPD_HH_DOWN <- tt_HPD.HH[tt_HPD.HH$logFC < 0, ]
+write.table(HPD_HH_UP, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/HPD_HH_up.csv", quote = FALSE, sep = ",", row.names = T)
+write.table(HPD_HH_DOWN, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/DE_lists/HPD_HH_down.csv", quote = FALSE, sep = ",", row.names = T)
+```
+
+# Compare to new tissue analysis
+# I re-ran the adipose tissue samples from hibernation and active season
+
+```{r Import tissue gene matrix, results = hide}
+
+gene_tissue <- read.csv("Tissue_reanalysis_gene_count_matrix.csv",header=T, row.names=1)
+
+# Count number of transcripts and number of individuals
+dim(gene_tissue)
+
+# Remove all annotated rRNA genes
+gene_tissue = gene_tissue[-which(rownames(gene_tissue) %in% c("gene10974|LOC113259291","gene17084|LOC113266004","gene26915|LOC113246229","gene26916|LOC113246230","gene27720|LOC113247006","gene29258|LOC113248751","gene29259|LOC113248750","gene29260|LOC113248754","gene29262|LOC113248752","gene29263|LOC113248755","gene29856|LOC113249424","gene6633|LOC113254166","gene946|LOC113257075","gene947|LOC113257125","rna54509","rna54511")),]
+
+dim(gene_tissue)
+
+# Trim out any transcripts with no counts
+total_tissue <- gene_tissue[rowSums(gene_tissue) > 0, ]
+
+# Count number of genes and individuals
+dim(total_tissue)
+
+# Remove genes that are expressed in few individuals
+keep_tissue <- rowSums(cpm(gene_tissue)>0.5) >= 3
+length(which(keep_tissue == TRUE))
+
+# Keep data that meet the filtering criteria
+gene.tissue <- gene_tissue[keep_tissue,]
+
+# Count number of transcripts left after trimming
+dim(gene.tissue)
+
+#Sum the columns, which is the library size for each sample
+lib_sizes_tissue <- colSums(gene.tissue)
+
+#Then multiply by 1e-6 to divide by one million
+lib_sizes_tissue_mod <- lib_sizes_tissue*1e-6
+
+#Make a barplot showing the library size of each sample
+#pdf(file = "1_Library_size.pdf")
+barplot(lib_sizes_tissue_mod, ylab="Library Size (Millions)", las=2, cex.names = 0.5, cex.axis = 1, xlab="Sample")
+#dev.off()
+
+group.tissue = factor(c("Active","Hibernation","Active","Hibernation","Active","Hibernation","Active","Hibernation","Active","Hibernation","Active","Hibernation"))
+y.tissue <- DGEList(counts=gene.tissue,group=group.tissue)
+y.tissue <- calcNormFactors(y.tissue)
+y.tissue$samples
+
+#Design Matrices with bear as a blocking factor
+Bears.tissue <- factor(c("Cooke","Cooke","Frank","Frank","John","John","Oakley","Oakley","Pacino","Pacino","Roan","Roan"))
+tissue.design <- model.matrix(~0+group.tissue+Bears.tissue, data = y.tissue$samples)
+tissue.design
+
+#Estimate Dispersions
+y.tissue <- estimateDisp(y.tissue, tissue.design, robust=TRUE)
+y.tissue$common.dispersion
+
+#Plot the BCV
+plotBCV(y.tissue)
+
+#Fit the data
+tissue.fit <- glmQLFit(y.tissue, tissue.design, robust=TRUE)
+head(tissue.fit$coefficients)
+plotQLDisp(tissue.fit)
+
+# Set up hib vs active tissue contrast
+tissue.qlf <- glmQLFTest(tissue.fit, contrast=c(-1,1,0,0,0,0,0))
+topTags(tissue.qlf)
+#summary(dt_tissue <- decideTestsDGE(tissue.qlf, p.value = 0.01))
+summary(dt_tissue <- decideTestsDGE(tissue.qlf, p.value = 0.05))
+
+# Identify DE genes
+isDE_tissue <- as.logical(dt_tissue)
+DE_tissue <- rownames(y.tissue)[isDE_tissue]
+length(DE_tissue)
+
+tt_tissue <- topTags(tissue.qlf, n = dim(tissue.qlf)[[1]], p.value = 0.05, adjust.method = "BH")$table
+write.table(tt_tissue, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/tt_tissue.csv", quote = FALSE, sep = ",", row.names = T)
+```
+
+# Merge tissue DE list with the AA.HH list to identify overlap
+
+```{r, results = hide}
+dim(merge(tt_AA.HH, tt_tissue, by = 0))
+dim(merge(tt_HPD.HH, tt_tissue, by = 0))
+dim(merge(tt_AA.HH, tt_HPD.HH, by = 0))
+
+dim(tissue_UP <- tt_tissue[tt_tissue$logFC > 0, ])
+dim(tissue_DOWN <- tt_tissue[tt_tissue$logFC < 0, ])
+AA.HH_UP <- tt_AA.HH[tt_AA.HH$logFC > 0, ]
+dim(merge(tissue_UP, AA.HH_UP, by = 0))
+AA.HH_DOWN <- tt_AA.HH[tt_AA.HH$logFC < 0, ]
+dim(merge(tissue_DOWN, AA.HH_DOWN, by = 0))
+
+```
+
+# Merge the gene lists and compare DE between tissue and culture
+
+```{r merge the two gene lists to compare DE between tissue and culture, results = hide}
+gene_merge <- merge(gene_all, gene_tissue, by = 0, row.names = 0)
+gene_merge <- data.frame(gene_merge[,-1], row.names=gene_merge[,1])
+dim(gene_merge)
+
+# Remove all annotated rRNA genes
+#gene_merge = gene_merge[-which(rownames(gene_merge) %in% c("gene10974|LOC113259291","gene17084|LOC113266004","gene26915|LOC113246229","gene26916|LOC113246230","gene27720|LOC113247006","gene29258|LOC113248751","gene29259|LOC113248750","gene29260|LOC113248754","gene29262|LOC113248752","gene29263|LOC113248755","gene29856|LOC113249424","gene6633|LOC113254166","gene946|LOC113257075","gene947|LOC113257125","rna54509","rna54511")),]
+
+#dim(gene_merge)
+
+# Trim out any transcripts with no counts
+total_merge <- gene_merge[rowSums(gene_merge) > 0, ]
+
+# Count number of genes and individuals
+dim(total_merge)
+
+# Remove genes that are expressed in few individuals
+keep_merge <- rowSums(cpm(gene_merge)>0.5) >= 3
+length(which(keep_merge == TRUE))
+
+# Keep data that meet the filtering criteria
+gene.merge <- gene_merge[keep_merge,]
+
+# Count number of transcripts left after trimming
+dim(gene.merge)
+
+#Sum the columns, which is the library size for each sample
+lib_sizes_merge <- colSums(gene.merge)
+
+#Then multiply by 1e-6 to divide by one million
+lib_sizes_merge_mod <- lib_sizes_merge*1e-6
+
+#Make a barplot showing the library size of each sample
+#pdf(file = "1_Library_size.pdf")
+barplot(lib_sizes_merge_mod, ylab="Library Size (Millions)", las=2, cex.names = 0.5, cex.axis = 1, xlab="Sample")
+#dev.off()
+
+group.merge = factor(c("AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AP", "HA", "HH", "HP", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation"))
+y.merge <- DGEList(counts=gene.merge,group=group.merge)
+y.merge <- calcNormFactors(y.merge)
+y.merge$samples
+cols = c("blue","red","black","green","purple","grey","orange","cyan")
+pch = c(13,14,15,16,17,18,19,20)
+for.plots = factor(c("AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AP", "HA", "HH", "HP", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation", "Active", "Hibernation"))
+
+pdf(file = "4_Merged_MDS_top10000.pdf")
+plotMDS(y.merge, top = 10000, col=cols[for.plots], pch=pch[for.plots], gene.selection = "common", xlab="MDS axis 1", ylab="MDS axis 2")
+legend("topright", as.character(c("A/A","A/H","A/PD","H/A","H/H","H/PD","Active","Hibernation")), col = cols[unique(for.plots)], pch = pch[unique(for.plots)])
+dev.off()
+
+#Construct MDS on top 500 expressed transcripts
+mds <- plotMDS(y.merge, top=500, gene.selection = "common", cex=0.5)
+
+#Design Matrices with bear as a blocking factor
+Bears.merge <- factor(c("Cooke","Cooke","Cooke","Cooke","Cooke","Cooke","Frank","Frank","Frank","Frank","Frank","Frank","John","John","John","John","John","John","Oakley","Oakley","Oakley","Oakley","Oakley","Oakley","Pacino","Pacino","Pacino","Pacino","Pacino","Pacino","Roan","Roan","Roan","Roan","Roan","Cooke","Cooke","Frank","Frank","John","John","Oakley","Oakley","Pacino","Pacino","Roan","Roan"))
+merge.design <- model.matrix(~0+group.merge+Bears.merge, data = y.merge$samples)
+merge.design
+
+#Estimate Dispersions
+y.merge <- estimateDisp(y.merge, merge.design, robust=TRUE)
+y.merge$common.dispersion
+
+#Plot the BCV
+plotBCV(y.merge)
+
+#Fit the data
+merge.fit <- glmQLFit(y.merge, merge.design, robust=TRUE)
+head(merge.fit$coefficients)
+plotQLDisp(merge.fit)
+
+# Set up hib vs active tissue contrast
+merge.qlf <- glmQLFTest(merge.fit, contrast=c(0,0,0,0,0,-1,1,0,0,0,0,0,0))
+topTags(merge.qlf)
+#summary(dt_merge <- decideTestsDGE(merge.qlf, p.value = 0.01))
+summary(dt_merge <- decideTestsDGE(merge.qlf, p.value = 0.05))
+
+# Identify DE genes
+isDE_merge <- as.logical(dt_merge)
+DE_merge <- rownames(y.merge)[isDE_merge]
+length(DE_merge)
+```
+
+# Make a Venn Diagram of DE genes
+```{r, results = hide}
+#pdf(file = "5_Venn.pdf")
+Hib_PostDex_Act      <- list()
+Hib_PostDex_Act$AA_HH  <- rownames(tt_AA.HH)
+Hib_PostDex_Act$HPD_HH <- rownames(tt_HPD.HH)
+Hib_PostDex_Act$AA_HPD <- rownames(tt_AA.HPD)
+#venn_hib_postdex_act <- Venn(Hib_PostDex_Act)
+#plot(venn_hib_postdex_act, doWeights=FALSE)
+
+overlap = calculate.overlap(Hib_PostDex_Act)
+draw.triple.venn(70,70,70,20,20,20,10,c(""))
+#dev.off()
+```
+
+# Another way to make a Venn
+```{r, results = hide}
+tt_AA.HH_UP <- rownames(tt_AA.HH[tt_AA.HH$logFC > 0,])
+tt_AA.HH_Down <- rownames(tt_AA.HH[tt_AA.HH$logFC < 0,])
+
+tt_HPD.HH_UP <- rownames(tt_HPD.HH[tt_HPD.HH$logFC > 0,])
+tt_HPD.HH_Down <- rownames(tt_HPD.HH[tt_HPD.HH$logFC < 0,])
+
+tt_AA.HPD_UP <- rownames(tt_AA.HPD[tt_AA.HPD$logFC > 0,])
+tt_AA.HPD_Down <- rownames(tt_AA.HPD[tt_AA.HPD$logFC < 0,])
+
+universe.UP <- unique(c(tt_AA.HH_UP, tt_HPD.HH_UP, tt_AA.HPD_UP))
+GroupA <- universe.UP %in% tt_AA.HH_UP
+GroupB <- universe.UP %in% tt_HPD.HH_UP
+GroupC <- universe.UP %in% tt_AA.HPD_UP
+input.df.UP <- data.frame(AA_HH=GroupA, HPD_HH=GroupB, AA_HPD=GroupC)
+colnames(input.df.UP)=c("Active cells with active serum vs. hibernation cells with hibernation serum","Hibernation cells with post-dextrose serum vs. hibernation cells with hibernation serum", "Active cells with active serum vs. hibernation cells with post-dextrose serum")
+head(input.df.UP)
+a <- vennCounts(input.df.UP)
+#pdf(file = "5_Venn.pdf")
+vennDiagram(a)
+#dev.off()
+
+universe.DOWN <- unique(c(tt_AA.HH_Down, tt_HPD.HH_Down, tt_AA.HPD_Down))
+GroupA <- universe.DOWN %in% tt_AA.HH_Down
+GroupB <- universe.DOWN %in% tt_HPD.HH_Down
+GroupC <- universe.DOWN %in% tt_AA.HPD_Down
+input.df.DOWN <- data.frame(AA_HH=GroupA, HPD_HH=GroupB, AA_HPD=GroupC)
+colnames(input.df.DOWN)=c("Active cells with active serum vs. hibernation cells with hibernation serum","Hibernation cells with post-dextrose serum vs. hibernation cells with hibernation serum", "Active cells with active serum vs. hibernation cells with post-dextrose serum")
+head(input.df.DOWN)
+b <- vennCounts(input.df.DOWN)
+#pdf(file = "5_Venn.pdf")
+vennDiagram(b)
+```
+
+# Make a merged gene list showing all genes and their log fold change and FDR
+```{r TopTags, results = hide}
+tt_AA.AH <- topTags(qlf.AA.AH, n = dim(qlf.AA.AH)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AA.AH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list1.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.APD <- topTags(qlf.AA.APD, n = dim(qlf.AA.APD)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AA.APD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list2.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.HA <- topTags(qlf.AA.HA, n = dim(qlf.AA.HA)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AA.HA, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list3.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.HH <- topTags(qlf.AA.HH, n = dim(qlf.AA.HH)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AA.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list4.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AA.HPD <- topTags(qlf.AA.HPD, n = dim(qlf.AA.HPD)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AA.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list5.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.APD <- topTags(qlf.AH.APD, n = dim(qlf.AH.APD)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AH.APD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list6.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.HA <- topTags(qlf.AH.HA, n = dim(qlf.AH.HA)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AH.HA, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list7.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.HH <- topTags(qlf.AH.HH, n = dim(qlf.AH.HH)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AH.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list8.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_AH.HPD <- topTags(qlf.AH.HPD, n = dim(qlf.AH.HPD)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_AH.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list9.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_APD.HA <- topTags(qlf.APD.HA, n = dim(qlf.APD.HA)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_APD.HA, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list10.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_APD.HH <- topTags(qlf.APD.HH, n = dim(qlf.APD.HH)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_APD.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list11.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_APD.HPD <- topTags(qlf.APD.HPD, n = dim(qlf.APD.HPD)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_APD.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list12.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_HA.HH <- topTags(qlf.HA.HH, n = dim(qlf.HA.HH)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_HA.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list13.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_HA.HPD <- topTags(qlf.HA.HPD, n = dim(qlf.HA.HPD)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_HA.HPD, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list14.csv", quote = FALSE, sep = ",", row.names = T)
+
+tt_HPD.HH <- topTags(qlf.HPD.HH, n = dim(qlf.HPD.HH)[[1]], p.value = 1, adjust.method = "BH")$table
+write.table(tt_HPD.HH, file = "/Users/michaelsaxton/Desktop/Projects/Cell_culture/merged_gene_list15.csv", quote = FALSE, sep = ",", row.names = T)
+```
+
+#Trying to make a circos diagram
+
+```{r}
+factors = 1:6
+circos.par(start.degree = 180, gap.degree = c(2,2,30,20,20,30))
+circos.initialize(factors = factors, xlim = c(0,6))
+circos.track(ylim = c(0,1))
+#circos.text(x = -3, y = 0.5, facing = c("bending.inside"), "test")
+circos.trackText(x = rep(3,6), y = rep(0.5,6), labels = c("ActC","HibC","SharedC","ActS","HibS","PostS"), facing = "bending.inside", factors = factors)
+circos.link("1", c(0,2), "6", c(5,6), col = "red", border = "black")
+circos.link("1", c(2,3), "5", c(5,6), col = "orange", border = "black")
+
+mat = matrix(data = c(966, 5111, 1406, 2, 4, 2, 794, 4626, 839), nrow = 3, ncol = 3)
+rownames(mat) = c("Act", "Hib", "Shared")
+colnames(mat) = c("Act:Hib", "Act:Post-Dex", "Hib:Post-Dex")
+chordDiagram(mat, preAllocateTracks = 1)
+circos.track(track.index = 1, {circos.text("Cell Type","Serum Comparison")})
+```
+
+#Make a heatmap
+
+```{r}
+#y$counts is the right thing to make the heatmap of, but I need to normalize. I should be able to use the cpm function and that will apply the normalization factors calculated in the Cell_culture RMD file
+#heat.genes <- cpm(y)
+#head(heat.genes)
+#heatmap(heat.genes, Rowv = NA, labRow = NA)
+
+logcounts <- cpm(y,log=TRUE)
+var_genes <- apply(logcounts, 1, var)
+head(var_genes)
+select_var <- names(sort(var_genes, decreasing=TRUE))[1:10000]
+head(select_var)
+highly_variable_lcpm <- logcounts[select_var,]
+dim(highly_variable_lcpm)
+head(highly_variable_lcpm)
+## Get some nicer colours
+mypalette <- brewer.pal(11,"RdYlBu")
+morecols <- colorRampPalette(mypalette)
+# Set up colour vector for celltype variable
+col.cell <- c("purple","yellow","red","green","grey","blue")[y$samples$group]
+
+pdf(file = "Heatmap_top10000.pdf")
+heatmap.2(highly_variable_lcpm,col=rev(morecols(50)),trace="none", main="Top 10000 most variable genes across samples",ColSideColors=col.cell,scale="row", dendrogram = "both", labRow = NA)
+dev.off()
+```
+
+### Making boxplots of specific genes
+
+```{r}
+idmap <- read.csv("IDmap_2019_02_20.csv", header = T)
+gene_all<- as.matrix(y$counts, header =T, row.names = 1)
+
+# n is count matrix
+# d is gene ID
+# i is ID matrix to map gene iD to gene name
+gene_boxplot_liver = function(d, n, i){
+  cpm.genes = as.data.frame(cpm(n))
+
+  group = factor(c("AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AH", "AP", "HA", "HH", "HP","AA", "AP", "HA", "HH", "HP"))
+
+  top.gene = cpm.genes[d,]
+  top.title = i[i$Gene_name == d,]$Annotation
+
+  colnames(top.gene) = group
+  ttgene = t(top.gene)
+  tmgene = melt(as.matrix(ttgene))
+
+  a = boxplot(tmgene$value ~ tmgene$Var1,las=1, names.arg="", main = top.title, ylab = "Normalized Counts (cpm)", cex.axis = 0.5)
+}
+```
+
+#Making the plots
+
+```{r}
+cpm_genes = as.data.frame(cpm(gene_all))
+group = factor(c("AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AH", "AG", "HA", "HH", "HG","AA", "AG", "HA", "HH", "HG"))
+d = "gene5326"
+goi = cpm_genes[d,]
+#top.title = idmap[idmap$Gene_name == d,]$Annotation
+colnames(goi) = group
+topgene = t(goi)
+txgene = melt(as.matrix(topgene))
+p7 <- ggplot(txgene, aes(x=Var1, y=value, fill=group)) +
+  geom_boxplot(show.legend = FALSE, fill = "white") +
+  scale_fill_viridis(discrete = TRUE) +
+  ggtitle("DEPTOR") +
+  geom_jitter(show.legend = FALSE, size = 5, width = 0.05) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Treatment") +
+  ylab("Normalized Counts (cpm)")
+p7
+
+d = "gene13984"
+goi = cpm_genes[d,]
+#top.title = idmap[idmap$Gene_name == d,]$Annotation
+colnames(goi) = group
+topgene = t(goi)
+txgene = melt(as.matrix(topgene))
+p8 <- ggplot(txgene, aes(x=Var1, y=value, fill=group)) +
+  geom_boxplot(show.legend = FALSE, fill = "white") +
+  scale_fill_viridis(discrete = TRUE) +
+  ggtitle("TBC1D1") +
+  geom_jitter(show.legend = FALSE, size = 5, width = 0.05) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Treatment") +
+  ylab("Normalized Counts (cpm)")
+p8
+
+d = "gene12680"
+goi = cpm_genes[d,]
+#top.title = idmap[idmap$Gene_name == d,]$Annotation
+colnames(goi) = group
+topgene = t(goi)
+txgene = melt(as.matrix(topgene))
+p9 <- ggplot(txgene, aes(x=Var1, y=value, fill=group)) +
+  geom_boxplot(show.legend = FALSE, fill = "white") +
+  scale_fill_viridis(discrete = TRUE) +
+  ggtitle("RICTOR") +
+  geom_jitter(show.legend = FALSE, size = 5, width = 0.05) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Treatment") +
+  ylab("Normalized Counts (cpm)")
+p9
+
+d = "gene1737|MEST"
+goi = cpm_genes[d,]
+#top.title = idmap[idmap$Gene_name == d,]$Annotation
+colnames(goi) = group
+topgene = t(goi)
+txgene = melt(as.matrix(topgene))
+p10 <- ggplot(txgene, aes(x=Var1, y=value, fill=group)) +
+  geom_boxplot(show.legend = FALSE, fill = "white") +
+  scale_fill_viridis(discrete = TRUE) +
+  ggtitle("MEST") +
+  geom_jitter(show.legend = FALSE, size = 5, width = 0.05) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Treatment") +
+  ylab("Normalized Counts (cpm)")
+p10
+
+d = "gene22044|EGFL6"
+goi = cpm_genes[d,]
+#top.title = idmap[idmap$Gene_name == d,]$Annotation
+colnames(goi) = group
+topgene = t(goi)
+txgene = melt(as.matrix(topgene))
+p11 <- ggplot(txgene, aes(x=Var1, y=value, fill=group)) +
+  geom_boxplot(show.legend = FALSE, fill = "white") +
+  scale_fill_viridis(discrete = TRUE) +
+  ggtitle("EGFL6") +
+  geom_jitter(show.legend = FALSE, size = 5, width = 0.05) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Treatment") +
+  ylab("Normalized Counts (cpm)")
+p11
+
+d = "gene17745"
+goi = cpm_genes[d,]
+#top.title = idmap[idmap$Gene_name == d,]$Annotation
+colnames(goi) = group
+topgene = t(goi)
+txgene = melt(as.matrix(topgene))
+p12 <- ggplot(txgene, aes(x=Var1, y=value, fill=group)) +
+  geom_boxplot(show.legend = FALSE, fill = "white") +
+  scale_fill_viridis(discrete = TRUE) +
+  ggtitle("NCS1") +
+  geom_jitter(show.legend = FALSE, size = 5, width = 0.05) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Treatment") +
+  ylab("Normalized Counts (cpm)")
+p12
+```
+
+### Making upset plots
+
+```{r}
+Bool_up <- read.csv("Boolean_Upregulated.csv", header = T)
+Bool_down <- read.csv("Boolean_Downregulated.csv", header = T)
+
+pdf('Figures/Upregulated_upset.pdf')
+upset(Bool_up, nsets=15, nintersects=NA, sets = c("HA.vs..HH", "AA.vs..HH", "HG.vs..HH", "AH.vs..HH", "AG.vs..HH", "AA.vs..AH", "AA.vs..HA", "AG.vs..HG", "AA.vs..AG", "AA.vs..HG", "HA.vs..HG"), keep.order = TRUE,
+        intersection = list("HA.vs..HH", "AA.vs..HH", "HG.vs..HH", "AH.vs..HH", "AG.vs..HH", "AA.vs..AH", "AA.vs..HA", "AG.vs..HG", "AA.vs..AG", "AA.vs..HG", "HA.vs..HG", list("AA.vs..HH", "AH.vs..HH"), list("AA.vs..HH", "HG.vs..HH"), list("AA.vs..AG", "AA.vs..HG"), list("AG.vs..HH", "HG.vs..HH"), list("AH.vs..HH", "HG.vs..HH", "AA.vs..HH", "HA.vs..HH", "AG.vs..HH"), list("HA.vs..HH", "AA.vs..AH")),
+        order.by = "degree", sets.x.label="Total DE gene count", mainbar.y.label="Overlapping DE gene count", text.scale=c(1.6, 1.5, 1.4, 1.2, 1.3, 1), number.angles=0)
+dev.off()
+
+pdf("Figures/Downregulated_upset.pdf")
+upset(Bool_down, nsets=15, nintersects=NA, sets = c("HA.vs..HH", "AA.vs..HH", "HG.vs..HH", "AH.vs..HH", "AG.vs..HH", "AA.vs..AH", "AA.vs..HA", "AG.vs..HG", "AA.vs..AG", "AA.vs..HG", "HA.vs..HG"), keep.order = TRUE,
+      intersection = list("HA.vs..HH", "AA.vs..HH", "HG.vs..HH", "AH.vs..HH", "AG.vs..HH", "AA.vs..AH", "AA.vs..HA", "AG.vs..HG", "AA.vs..AG", "AA.vs..HG", "HA.vs..HG", list("AA.vs..HH", "AH.vs..HH"), list("AA.vs..HH", "HG.vs..HH"), list("AA.vs..AG", "AA.vs..HG"), list("AG.vs..HH", "HG.vs..HH"), list("AH.vs..HH", "HG.vs..HH", "AA.vs..HH", "HA.vs..HH", "AG.vs..HH"), list("HA.vs..HH", "AA.vs..AH")),
+      order.by = "degree", sets.x.label="Total DE gene count", mainbar.y.label="Overlapping DE gene count", text.scale=c(1.6, 1.5, 1.4, 1.2, 1.3, 1), number.angles=0)
+dev.off()
+
+#pdf("Figures/UpsetHS.pdf", height=7, width=7)
+#upset(Bool, nsets=10, nintersects=25, sets.x.label="Total hotspot count", mainbar.y.label="Overlapping hotspot count", text.scale=c(1.6, 1.5, 1.4, 1.2, 1.3, 1))
+#dev.off()
+
+intersection = list("HA.vs..HH", "AA.vs..HH", "HPD.vs..HH", "AH.vs..HH", "AA.vs..AH", "AA.vs..HA", "APD.vs..HPD", "AA.vs..APD", "HA.vs..HPD", list("AA.vs..HH", "AH.vs..HH"), list("AH.vs..HH", "HPD.vs..HH", "AA.vs..HH", "HA.vs..HH"), list("HA.vs..HH", "AA.vs..AH"))
+intersection = list("HA.vs..HH", "AA.vs..HH", "HPD.vs..HH", "AH.vs..HH", "AA.vs..AH", "AA.vs..HA", "APD.vs..HPD", "AA.vs..APD", "HA.vs..HPD", list("AA.vs..HH", "AH.vs..HH"), list("AH.vs..HH", "HPD.vs..HH", "AA.vs..HH", "HA.vs..HH", "APD.vs..HH"), list("HA.vs..HH", "AA.vs..AH"))
+
+UpSet(Bool_up, set_order = c("HA.vs..HH", "AA.vs..HH", "HPD.vs..HH", "AH.vs..HH", "APD.vs..HH", "AA.vs..AH", "AA.vs..HA", "APD.vs..HPD", "AA.vs..APD", "AA.vs..HPD", "HA.vs..HPD"),
+      comb_order = NULL)
+```

@@ -1,0 +1,270 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2578
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww25940\viewh13640\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 ### Version Info\
+# FastQC: 0.11.8\
+# Trim Galore!: 0.6.5\
+# Cutadapt: 2.7\
+# HiSat2: 2.1.0\
+# Picard Tools: 2.21.4\
+# Samtools: 1.10\
+# Stringtie: 2.0.5\
+# R: 3.6.2\
+# Rstudio: 1.2.5019\
+\
+### Starting to run the pipeline for the samples, beginning with FastQC. I decided to combine all the\
+### files from the three runs into one folder so I wrote the script to run qc on files in all\
+### three data folders. When I checked the datatable that I made I noticed an error in that one\
+### file was not getting the path to the reads in the datatable. After some troubleshooting\
+### by running individual lines of the script for just that one file on the head node\
+### I found the error was in the file name and fixed it.\
+\
+### Next I am going to run TrimGalore but I need to download the most recent version, as the version\
+### we have on kamiak is an old version. To do this I went to the website for trim galore,\
+### right clicked on the download button and selected "copy link address." Then I go into the\
+### programs folder on kamiak and use:\
+\
+wget https://github.com/FelixKrueger/TrimGalore/archive/0.6.5.tar.gz\
+\
+# This downloads a zip file which I have to unpack with:\
+\
+tar -xzf 0.6.5.tar.gz\
+\
+### I raised the issue with Joanna that the Brown_RNA_seq run had one sample that appeared to be\
+### modified, there was a _trim added to the file name. She was not sure what that was so\
+### she unpacked the original version sent from the core again and deleted the Brown folder.\
+### She then replaced the folder so the path is still the same for the new files (other\
+### than the one _trim extension).\
+\
+\
+### Okay, time to start analyzing samples.\
+### First I ran the samples through FastQC to make sure they looked okay.\
+\
+#!/bin/bash\
+#SBATCH --job-name=fastqc                     ### Job name\
+#SBATCH --partition=popgenom                  ### Partition\
+#SBATCH --output=job.out                      ### File in which to store job output\
+#SBATCH --error=job.err                       ### File in which to store job error\
+#SBATCH --time=7-00:00:00                     ### Wall clock time limit in Days-HH:MM:SS\
+#SBATCH --nodes=1                             ### Node count required for the job\
+#SBATCH --ntasks-per-node=1                   ### Number of tasks to be launched per Node\
+#SBATCH --mail-type=END,FAIL                  ### email info\
+#SBATCH --mail-user=michael.saxton@wsu.edu    ### email info\
+\
+fastqc -o /data/kelley/projects/bear_culture_saxton/1_FastQC/Results --noextract --nogroup /data/kelley/projects/bear_cell_culture/data/Kelley_RNA_Seq_1st_Run/*fastq.gz\
+fastqc -o /data/kelley/projects/bear_culture_saxton/1_FastQC/Results --noextract --nogroup /data/kelley/projects/bear_cell_culture/data/Kelley_RNA_Seq_2nd_Run/*fastq.gz\
+fastqc -o /data/kelley/projects/bear_culture_saxton/1_FastQC/Results --noextract --nogroup /data/kelley/projects/bear_cell_culture/data/Brown_RNA_Seq/*fastq.gz\
+\
+### Samples looked alright, per tile sequence quality wasn't great, but not bad. I removed the first\
+### 12 bases from all reads in the trimming because, as usual, they looked like garbage.\
+### A sample line from the datatable looks like this:\
+\
+CAA_S20_L008 /data/kelley/projects/bear_cell_culture/data/Brown_RNA_Seq/CAA_S20_L008_R1_001.fastq.gz /data/kelley/projects/bear_cell_culture/data/Brown_RNA_Seq/CAA_S20_L008_R2_001.fastq.gz\
+\
+### So it is sample name, full path to read 1, full path to read 2.\
+### In order to make that datatable I made two files, one with all the sample names, and\
+### one with the full path to all the reads. Then I used the following script:\
+\
+#!/bin/bash\
+\
+nlines=$(wc -l < file_names_unique | awk '\{print$1\}')\
+\
+\
+#Briefly, create 2 files, one that that contains all unique sample IDS and one that contains all reads with full path. Then the below code will search inside the file of fullpath reads using the unique sample IDS as an input for grep. Then this is piped to another grep looking for read1 or 2, the end of line characters are replaced with commas, the last sed statement will then replace the last comma with an end of line character.  The last step will append the three variables in three columns into a file called datatable\
+\
+for((i=1; i<=nlines; i++));do\
+        file_name=$(sed -n ''$i'p' file_names_unique | awk '\{print$1\}')\
+        read1_list=$(cat fullpath_Reads | grep "$\{file_name\}" | grep "R1" | tr "\\n" "," | sed '$s/,$/\\n/')\
+        read2_list=$(cat fullpath_Reads | grep "$\{file_name\}" | grep "R2" | tr "\\n" "," | sed '$s/,$/\\n/')\
+        echo "$\{file_name\} $\{read1_list\} $\{read2_list\}" >> datatable\
+done\
+\
+### From that datatable I ran the script for trimming\
+\
+#!/bin/bash\
+#SBATCH --partition=popgenom\
+#SBATCH --cpus-per-task=1\
+#SBATCH --job-name=trimgalore\
+#SBATCH --array=1-105:1\
+#SBATCH --out=slurm_out\
+#SBATCH --output=Trim_fastqc_output.txt\
+#SBATCH --error=Trim_fastqc_error.txt\
+\
+mkdir trimmed_reads\
+mkdir fastqc\
+\
+module load anaconda2/4.2.0\
+module load cutadapt/2.7\
+\
+#Saving variables for the array using datatable as the input\
+file_name=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$1\}')\
+read1=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$2\}')\
+read2=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$3\}')\
+\
+#--paired due to paired end, -q quality score of 20, --stringency overlap of 5 bases with adapter, keep reads longer than 50, clip 12 off of start of reads\
+/data/kelley/projects/programs/TrimGalore-0.6.5/trim_galore --paired -q 20 --fastqc --fastqc_args "--noextract --nogroup \\\
+--outdir /data/kelley/projects/bear_culture_saxton/2_TrimGalore/fastqc/" --stringency 5 --illumina --length 50 \\\
+-o trimmed_reads/ --clip_R1 12 --clip_R2 12 $read1 $read2\
+\
+### I looked at the fastqc reports after trimming and they looked pretty god so I continued to HiSat2\
+### First I made a new datatable with the sample name, then the path to the trimmed read1 and read 2. Sample line:\
+\
+CAA_S20_L008 /data/kelley/projects/bear_culture_saxton/2_TrimGalore/trimmed_reads/CAA_S20_L008_R1_001_val_1.fq.gz /data/kelley/projects/bear_culture_saxton/2_TrimGalore/trimmed_reads/CAA_S20_L008_R2_001_val_2.fq.gz\
+\
+### Then I ran Hisat2. and output the results into scratch space.\
+\
+#!/bin/bash\
+#SBATCH --partition=kamiak\
+#SBATCH --cpus-per-task=1\
+#SBATCH --array=1-105:1\
+#SBATCH --mem=50G\
+#SBATCH --output=HiSat_output.txt\
+#SBATCH --error=HiSat_error.txt\
+\
+mkdir stats\
+mkdir unmapped\
+\
+#Saving variables for the array using datatable as the input\
+file_name=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$1\}')\
+read1=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$2\}')\
+read2=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$3\}')\
+\
+#--phred33 is the type of quality scores, -k 10 is for Hierarchical Graph FM index, --rg-id sets the read group ID, --rg creats a field on the rg header line, -p is the number of threads, --rna-strandness RF is the strand orientation and RF is the orientation for illumina gold library prep for bowtie and hisat2, --fr is the upstream and downstream mate orientation, --dta sets up the results in a format stringtie can use, --un-conc-gz unmapped reads will be gzipped in the location specified by this flag, -x is the base name and location for the reference, -1 is a comma seperated list of all read1s, -2 is a comma seperated list of all read2s, -S is the file to write sam alingments to.\
+\
+hisat2 --phred33 -k 10 --met-file stats/$\{file_name\}.stats --rg-id $\{file_name\} --rg SM:$\{file_name\} --rg PL:illumina \\\
+-p 1 --rna-strandness RF --fr --dta --un-conc-gz unmapped/$\{file_name\}.unmapped \\\
+-x /data/kelley/projects/bear_RNA/Uarctoshorribilis/Uarctoshorribilis-genomic -1 $\{read1\} -2 $\{read2\} -S /scratch/michael.saxton_469775/$\{file_name\}.sam\
+\
+### Then I created a datatable to fix any errors in the sam file and sort them by position. Sample line:\
+\
+CAA_S20_L008    /scratch/michael.saxton_469775/CAA_S20_L008.sam\
+\
+### From there I ran the script to fix and sort.\
+\
+#!/bin/bash\
+#SBATCH --partition=kamiak\
+#SBATCH --job-name=Fix_sort\
+#SBATCH --cpus-per-task=10\
+#SBATCH --array=1-105:1\
+#SBATCH --output=Fix_sort_output.txt\
+#SBATCH --error=Fix_sort_error.txt\
+\
+mkdir results\
+\
+#module load java\
+module load picard/2.21.4\
+\
+file_name=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$1\}')\
+sam_in=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$2\}')\
+\
+\
+picard FixMateInformation INPUT=$\{sam_in\} \\\
+OUTPUT=/scratch/michael.saxton_469775/$\{file_name\}.fix.sam VALIDATION_STRINGENCY=SILENT\
+\
+samtools view -@ 10 -b -h /scratch/michael.saxton_469775/$\{file_name\}.fix.sam >/scratch/michael.saxton_469775/$\{file_name\}.bam\
+\
+samtools sort -m 4G -o results/$\{file_name\}_sorted_fixed.bam -O bam -T $\{file_name\} -@ 10 /scratch/michael.saxton_469775/$\{file_name\}.bam\
+\
+### Then I want to check the mapping stats for each sample.\
+\
+#!/bin/bash\
+#SBATCH --partition=kamiak\
+#SBATCH --job-name=picard_mapping\
+#SBATCH --cpus-per-task=1\
+#SBATCH --array=1-105:1\
+#SBATCH --mail-type=END,FAIL\
+#SBATCH --mail-user=michael.saxton@wsu.edu\
+#SBATCH --output=Picard_out\
+#SBATCH --error=Picard_error\
+#SBATCH --mem=20G\
+\
+module load picard/2.21.4\
+\
+mkdir picard_output\
+\
+file_name=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print $1\}')\
+read1=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print $2\}')\
+\
+module load java\
+\
+picard CollectAlignmentSummaryMetrics \\\
+R=/data/kelley/projects/bear_RNA/Uarctoshorribilis/GCF_003584765.1_ASM358476v1_genomic.fna \\\
+I=$\{read1\} \\\
+O=/data/kelley/projects/bear_culture_saxton/4_Fix_sort_bam/picard_mapping_stats/picard_output/$\{file_name\}_alignmentsummarymetrics\
+\
+### I want to merge the three different runs for each sample so I made a datatable like this:\
+\
+CAA /data/kelley/projects/bear_culture_saxton/4_Fix_sort_bam/results/CAA_S20_L008_sorted_fixed.bam /data/kelley/projects/bear_culture_saxton/4_Fix_sort_bam/results/CAA_1stRun_S20_L001_sorted_fixed.bam /data/kelley/projects/bear_culture_saxton/4_Fix_sort_bam/results/CAA_2ndRun_S20_L001_sorted_fixed.bam\
+\
+### I used PicardTools to merge the files.\
+\
+#!/bin/bash\
+#SBATCH --partition=kamiak\
+#SBATCH --cpus-per-task=1\
+#SBATCH --array=1-35:1\
+#SBATCH --mem=30G\
+#SBATCH --output=Picard_merge_output.txt\
+#SBATCH --error=Picard_merge_error.txt\
+\
+module load picard/2.21.4\
+\
+mkdir results\
+\
+#Saving variables for the array using datatable as the input\
+file_name=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$1\}')\
+run1=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$2\}')\
+run2=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$3\}')\
+run3=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print$4\}')\
+\
+Call each of the three runs and merge them into one bam file\
+picard MergeSamFiles \\\
+I=$\{run1\} \\\
+I=$\{run2\} \\\
+I=$\{run3\} \\\
+O=/data/kelley/projects/bear_culture_saxton/5_Merge_bams/results/$\{file_name\}_temp.bam\
+\
+samtools sort -m 4G -o /data/kelley/projects/bear_culture_saxton/5_Merge_bams/results/$\{file_name\}_merged.bam -O bam -T $\{file_name\} -@ 10 /data/kelley/projects/bear_culture_saxton/5_Merge_bams/results/$\{file_name\}_temp.bam\
+\
+rm /data/kelley/projects/bear_culture_saxton/5_Merge_bams/results/*_temp.bam\
+\
+### Next step is stringtie, datatable looks like:\
+\
+CAA     /data/kelley/projects/bear_culture_saxton/5_Merge_bams/results/CAA_merged.bam\
+\
+### Run stringtie\
+\
+#!/bin/bash\
+#SBATCH --partition=popgenom\
+#SBATCH --job-name=stringtie\
+#SBATCH --cpus-per-task=2\
+#SBATCH --array=1-35:1\
+#SBATCH --output=Stringtie_output.txt\
+#SBATCH --error=Stringtie_error.txt\
+#SBATCH --mail-type=END,FAIL\
+#SBATCH --mail-user=michael.saxton@wsu.edu\
+\
+mkdir results\
+\
+file_name=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print $1\}')\
+fixed_bam=$(sed -n ''$SLURM_ARRAY_TASK_ID'p' datatable | awk '\{print $2\}')\
+\
+stringtie $\{fixed_bam\} -o results/$\{file_name\}.gtf -m 50 --rf -e -B -c 10 -p 2 \\\
+-G /data/kelley/projects/bear_RNA/Uarctoshorribilis/GCF_003584765.1_ASM358476v1_modified_mito.gff\
+\
+### Datatable to run prepde.py:\
+\
+CAA     /data/kelley/projects/bear_culture_saxton/6_Stringtie/results/CAA.gtf\
+\
+### Run prepde.py:\
+\
+#!/bin/bash\
+#SBATCH --partition=popgenom\
+#SBATCH --job-name=prepde\
+\
+#-i is the list of stringtie individual count matrices, -g is gene count matrix output, -t is transcript count matrix output, -l is average read length (check fastqc report post trimming to find this)\
+\
+python /data/kelley/projects/programs/stringtie-2.0.5.Linux_x86_64/prepDE.py -i datatable -g /data/kelley/projects/bear_culture_saxton/7_PrepDE/matrix_with_fixed_brown_bear/gene_count_matrix.csv -t /data/kelley/projects/bear_culture_saxton/7_PrepDE/matrix_with_fixed_brown_bear/transcript_count_matrix.csv -l 88}
