@@ -84,23 +84,29 @@ The following R script contains code used to:
 - Perform differential expression analyses between treatment pairs
 - Generate multi-dimensional scaling (MDS) plots to assess large-scale patterns in expression across samples
 - Generate supplementary upset plot figures to compare differentially expressed genes across analyses
+
 Link to Rscript: [2_RNAseq_DiffExpression.Rmd](https://github.com/blairperry/brownbear-adipose-cellculture-bwp/blob/main/3_analyses/2_RNAseq_DiffExpression.Rmd)
 
 The following R script contains code used for subsequent post-hoc analysis and plotting of pairwise comparison results, inlcuding:
 - Plotting total number of differentially expressed (DE) genes for focal analyses
 - Plotting euler venn diagrams and heatmaps of overlapping DE genes between focal analyses
 - Comparing DE genes with previous tissue level DE genes from Jansen et al. 2021
+
 Link to Rscript: [3_RNAseq_ExploreDiffExpResults.R](https://github.com/blairperry/brownbear-adipose-cellculture-bwp/blob/main/3_analyses/3_RNAseq_ExploreDiffExpResults.R)
 
 ### 3. Weighted Gene Correlation Network Analysis (WGCNA)
 The following R script contains code used to run WGCNA analyses and plot results
+
 Link to Rscript: [4_RNAseq_WGCNA.R](https://github.com/blairperry/brownbear-adipose-cellculture-bwp/tree/main/3_analyses#:~:text=5%20minutes%20ago-,4_RNAseq_WGCNA.R,-initial%20commit)
 
 ### 4. Gene Ontology (GO) term overrepresentation analysis
 The following R script contains code used to run GO analyses on sets of DE genes and WGCNA modules
+
 Link to Rscript: [5_RNAseq_GOanalysis.R](https://github.com/blairperry/brownbear-adipose-cellculture-bwp/blob/main/3_analyses/5_RNAseq_GOanalysis.R)
 
 ### 5. Candidate gene investigation
 We curated lists of candidate genes associated with a) senescence phenotypes in adipocytes (based on Figure 5b in [Li et al. 2021](https://www.nature.com/articles/s41591-021-01501-8)) and b) the Complement and [Coagulation Cascades KEGG Pathway (hsa04610)](https://www.genome.jp/pathway/hsa04610) and investigate the expression of these candidate genes in our dataset. The following two R scripts contain code used to run these analyses.
+
 Link to senescence Rscript: [6a_RNAseq_SenescenceCandidates.R](https://github.com/blairperry/brownbear-adipose-cellculture-bwp/blob/main/3_analyses/6a_RNAseq_SenescenceCandidates.R)
+
 Link to complement Rscript: [6b_RNAseq_ComplementCandidates.R](https://github.com/blairperry/brownbear-adipose-cellculture-bwp/blob/main/3_analyses/6b_RNAseq_ComplementCandidates.R)
